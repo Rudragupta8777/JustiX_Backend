@@ -3,33 +3,53 @@ const aiService = require('../services/aiService');
 const Meeting = require('../models/Meeting');
 const Case = require('../models/Case');
 
+// CRITICAL: This must be a direct function export
 module.exports = (io, socket) => {
-    let currentMeetingId = null;
+    let currentMeetingId = null; 
 
-    // VR joins the meeting room
-    socket.on('join_meeting', (meetingId) => {
-        currentMeetingId = meetingId;
-        console.log(`User joined meeting: ${meetingId}`);
-        socket.join(meetingId);
+    // 1. VR sends the 6-Digit Code
+    socket.on('join_meeting', async (meetingCode) => {
+        try {
+            console.log(`VR trying to join with code: ${meetingCode}`);
+
+            // FIND THE MEETING BY CODE
+            const meeting = await Meeting.findOne({ meeting_code: meetingCode });
+
+            if (!meeting) {
+                console.log("❌ Meeting Code Not Found");
+                socket.emit('error', 'Invalid Meeting Code');
+                return;
+            }
+
+            // Store REAL ID internally
+            currentMeetingId = meeting._id.toString();
+            socket.join(currentMeetingId); 
+            
+            console.log(`✅ User joined meeting room: ${currentMeetingId}`);
+            socket.emit('joined', { success: true }); 
+
+        } catch (err) {
+            console.error("Join Error:", err);
+            socket.emit('error', 'Server Error');
+        }
     });
 
-    // Audio Stream Processing
+    // 2. Audio Processing
     socket.on('audio_data', async (audioBuffer) => {
-        if (!currentMeetingId) return;
+        if (!currentMeetingId) return; 
 
         const tempFilePath = `uploads/audio_${socket.id}_${Date.now()}.wav`;
 
         try {
-            // 1. Write Audio File
             fs.writeFileSync(tempFilePath, audioBuffer);
 
-            // 2. STT (Deepgram)
+            // STT
             const userText = await aiService.transcribeAudio(tempFilePath);
             console.log("User said:", userText);
 
-            if (!userText) return; // Ignore silence
+            if (!userText) return;
 
-            // 3. Get Context
+            // Fetch Context
             const meeting = await Meeting.findById(currentMeetingId);
             const caseData = await Case.findById(meeting.case_id);
             
@@ -38,29 +58,28 @@ module.exports = (io, socket) => {
                 content: t.text
             }));
 
-            // 4. AI Logic (GPT-4o)
+            // AI Logic
             const aiResponseText = await aiService.getAIResponse(userText, meeting.case_id, history);
 
-            // 5. TTS (OpenAI)
+            // TTS
             const audioBase64 = await aiService.generateAudio(aiResponseText);
 
-            // 6. Save Turn to DB
+            // Save to DB
             meeting.transcript.push({ speaker: "User", text: userText });
             meeting.transcript.push({ speaker: "Lawyer", text: aiResponseText });
             await meeting.save();
 
-            // 7. Send to VR
+            // Send to VR
             socket.emit('ai_response', {
                 text: aiResponseText,
                 audio: audioBase64,
                 speaker: "Lawyer",
-                animation: "Objection" // You can randomize this
+                animation: "Objection"
             });
 
         } catch (err) {
             console.error("Socket Error:", err);
         } finally {
-            // Cleanup temp file
             if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
         }
     });

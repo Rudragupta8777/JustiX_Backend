@@ -1,31 +1,45 @@
 const Meeting = require('../models/Meeting');
 const aiService = require('../services/aiService');
 
-// Start/Resume Meeting
+// --- HELPER FUNCTION (Define this outside the exports) ---
+const generateMeetingCode = () => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+// 1. Start/Resume Meeting
 exports.createMeeting = async (req, res) => {
     try {
         const { caseId } = req.body;
         const userId = req.user.uid;
 
-        // Auto-increment meeting number
         const count = await Meeting.countDocuments({ case_id: caseId, user_id: userId });
         
+        // Generate a unique code
+        let code = generateMeetingCode();
+
         const newMeeting = new Meeting({
             case_id: caseId,
             user_id: userId,
             meeting_number: count + 1,
+            meeting_code: code, // SAVE THE CODE
             transcript: [],
             status: "active"
         });
 
         await newMeeting.save();
-        res.json({ success: true, meetingId: newMeeting._id });
+
+        res.json({ 
+            success: true, 
+            meetingCode: code, 
+            meetingId: newMeeting._id 
+        });
+
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 };
 
-// Pause/End Meeting
+// 2. End Meeting
 exports.endMeeting = async (req, res) => {
     try {
         const meeting = await Meeting.findById(req.params.id);
@@ -34,7 +48,6 @@ exports.endMeeting = async (req, res) => {
         // Generate Analysis
         const analysis = await aiService.generatePostSessionAnalysis(meeting.transcript);
 
-        // Update DB
         meeting.summary = analysis.summary;
         meeting.feedback = analysis.feedback;
         meeting.score = analysis.score;
@@ -49,13 +62,13 @@ exports.endMeeting = async (req, res) => {
     }
 };
 
-// Get Single Meeting
+// 3. Get Meeting
 exports.getMeeting = async (req, res) => {
     const meeting = await Meeting.findById(req.params.id);
     res.json(meeting);
 };
 
-// Get All Meetings for a Case (History)
+// 4. Get History
 exports.getCaseHistory = async (req, res) => {
     const meetings = await Meeting.find({ 
         case_id: req.params.caseId,

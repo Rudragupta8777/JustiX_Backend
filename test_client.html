@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VerdicTech VR Simulator</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style> body { font-family: monospace; padding: 20px; background: #222; color: #fff; } input { padding: 10px; width: 300px; } button { padding: 10px 20px; cursor: pointer; } #log { background: #333; height: 300px; overflow-y: scroll; padding: 10px; border: 1px solid #555; margin-top: 10px; } .user { color: #0f0; } .ai { color: #f0f; } </style>
+</head>
+<body>
+    <h1>🥽 VR Simulator</h1>
+    <input type="text" id="meetingCode" placeholder="Enter 6-Digit Code (e.g. 801381)">
+    <button onclick="joinMeeting()">Join Meeting</button>
+    <br><br>
+    <button onmousedown="startRecording()" onmouseup="stopRecording()">🎤 Hold SPACE to Speak</button>
+    <div id="log"></div>
+
+    <script>
+        const socket = io("http://localhost:5050"); 
+        let mediaRecorder; let audioChunks = [];
+
+        socket.on("connect", () => log("🟢 Connected to Server", "status"));
+        
+        socket.on("ai_response", (data) => {
+            log(`AI: ${data.text}`, "ai");
+            new Audio("data:audio/mp3;base64," + data.audio).play();
+        });
+
+        function joinMeeting() {
+            const code = document.getElementById("meetingCode").value;
+            socket.emit("join_meeting", code); // Sending the 6-digit code
+            log("Joining with code: " + code, "user");
+        }
+
+        // Audio Logic
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(audioChunks, { type: 'audio/wav' });
+                audioChunks = [];
+                const reader = new FileReader();
+                reader.readAsArrayBuffer(blob);
+                reader.onloadend = () => {
+                    socket.emit("audio_data", reader.result);
+                    log("Sent Audio...", "user");
+                };
+            };
+        });
+
+        function startRecording() { mediaRecorder?.start(); }
+        function stopRecording() { mediaRecorder?.stop(); }
+        function log(msg, type) { 
+            const d = document.createElement("div"); d.className = type; d.innerText = msg; 
+            document.getElementById("log").appendChild(d); 
+        }
+        document.body.onkeydown = (e) => { if(e.code === "Space") startRecording(); }
+        document.body.onkeyup = (e) => { if(e.code === "Space") stopRecording(); }
+    </script>
+</body>
+</html>
