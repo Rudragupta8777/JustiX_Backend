@@ -9,7 +9,7 @@ const socketHandler = require('./sockets/socketHandler');
 const app = express();
 const server = http.createServer(app);
 
-// Enable CORS for VR and Mobile
+// Enable CORS for VR (Unity) and Mobile
 const io = new Server(server, { 
     cors: { origin: "*" },
     maxHttpBufferSize: 1e8 // Allow large audio packets
@@ -22,11 +22,11 @@ app.use(express.json());
 // Routes
 app.use('/api/cases', caseRoutes);
 
-// Socket Connection
+// Socket Connection (Real-time Audio)
 io.on('connection', (socket) => {
-    console.log('VR Headset Connected:', socket.id);
+    console.log('Device Connected:', socket.id);
     socketHandler(io, socket);
 });
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 5050;
 server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

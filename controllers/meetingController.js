@@ -1,30 +1,31 @@
 const Meeting = require('../models/Meeting');
-const aiService = require('../services/aiService'); //
+const Case = require('../models/Case'); // Required for VR Join to fetch images
+const aiService = require('../services/aiService');
 
 // Helper for 6-digit code
 const generateMeetingCode = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// 1. Create Meeting (UPDATED)
+// 1. Create Meeting (Starts a new session from Mobile)
 exports.createMeeting = async (req, res) => {
     try {
         const { caseId } = req.body;
         const userId = req.user.uid; // From auth middleware
 
-        // 1. Calculate Meeting Number
+        // A. Calculate Meeting Number
         // We count how many meetings already exist for this specific case
         const count = await Meeting.countDocuments({ case_id: caseId });
         const nextNumber = count + 1;
 
-        // 2. Generate Code
+        // B. Generate Unique Code
         let code = generateMeetingCode();
 
-        // 3. Create Document
+        // C. Create Document
         const newMeeting = new Meeting({
             case_id: caseId,
             user_id: userId,
-            meeting_number: nextNumber, // Save the number
+            meeting_number: nextNumber, // Save the sequential number
             meeting_code: code,
             transcript: [],
             status: "active"
@@ -32,12 +33,12 @@ exports.createMeeting = async (req, res) => {
 
         await newMeeting.save();
 
-        // 4. Return the Number in the response so Android can see it immediately
+        // D. Return the Number so Android displays "Session #X" immediately
         res.json({ 
             success: true, 
             meetingCode: code, 
             meetingId: newMeeting._id,
-            meetingNumber: nextNumber // <--- ADDED THIS
+            meetingNumber: nextNumber 
         });
 
     } catch (err) {
@@ -46,7 +47,48 @@ exports.createMeeting = async (req, res) => {
     }
 };
 
-// 2. End Meeting (UPDATED)
+// 2. VR Join (Headset calls this to validate code & get images)
+exports.joinMeetingVR = async (req, res) => {
+    try {
+        const { meetingCode } = req.body;
+
+        if (!meetingCode) {
+            return res.status(400).json({ error: "Meeting Code is required" });
+        }
+
+        // A. Find the Meeting
+        const meeting = await Meeting.findOne({ meeting_code: meetingCode });
+        if (!meeting) {
+            return res.status(404).json({ error: "Invalid Session Code" });
+        }
+
+        // B. Find the Case Details (Specifically Images)
+        const caseData = await Case.findById(meeting.case_id);
+        if (!caseData) {
+            return res.status(404).json({ error: "Case file not found" });
+        }
+
+        // C. Return Everything the VR Needs
+        res.json({
+            success: true,
+            meetingId: meeting._id,
+            caseId: caseData._id,
+            caseTitle: caseData.title,
+            
+            // The VR headset will spawn these pages on the virtual desk
+            evidencePages: caseData.page_images, 
+            
+            // Optional context for local processing
+            caseSummary: caseData.summary
+        });
+
+    } catch (err) {
+        console.error("VR Join Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// 3. End Meeting (Called by VR or Mobile to finish session)
 exports.endMeeting = async (req, res) => {
     try {
         const { meetingCode } = req.body;
@@ -59,6 +101,7 @@ exports.endMeeting = async (req, res) => {
         
         if (!meeting) return res.status(404).json({ error: "Meeting not found" });
 
+        // Idempotency check: If already completed, just return results
         if (meeting.status === "completed") {
             return res.json({ 
                 success: true, 
@@ -68,7 +111,7 @@ exports.endMeeting = async (req, res) => {
             });
         }
 
-        // AI Analysis
+        // Generate AI Analysis
         const analysis = await aiService.generatePostSessionAnalysis(meeting.transcript);
 
         meeting.summary = analysis.summary;
@@ -87,7 +130,7 @@ exports.endMeeting = async (req, res) => {
     }
 };
 
-// 3. Get Meeting
+// 4. Get Single Meeting (For Details Screen)
 exports.getMeeting = async (req, res) => {
     try {
         const meeting = await Meeting.findById(req.params.id);
@@ -97,7 +140,7 @@ exports.getMeeting = async (req, res) => {
     }
 };
 
-// 4. Get History (This returns the full object with meeting_number)
+// 5. Get History (For Case Details List)
 exports.getCaseHistory = async (req, res) => {
     try {
         const meetings = await Meeting.find({ 
