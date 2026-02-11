@@ -53,9 +53,16 @@ exports.generateAudio = async (text, speaker) => {
         console.log(`Generating Audio for ${speaker}...`);
 
         // Select Voice based on Persona
-        // Judge = "aura-orion-en" (Deep Male)
-        // Lawyer = "aura-asteria-en" (Sharp Female) or "aura-arcas-en" (Male)
-        const modelName = (speaker === "Judge") ? "aura-orion-en" : "aura-asteria-en";
+        // Judge  = "aura-orion-en" (Deep, Authoritative Male)
+        // Lawyer = "aura-arcas-en" (Sharp, Energetic Male) -> DISTINCT from Judge
+        
+        let modelName;
+        if (speaker === "Judge") {
+            modelName = "aura-orion-en";
+        } else {
+            // "Lawyer" or any other speaker uses the second male voice
+            modelName = "aura-arcas-en"; 
+        }
 
         const response = await deepgram.speak.request(
             { text },
