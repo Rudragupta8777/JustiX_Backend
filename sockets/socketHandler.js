@@ -3,28 +3,29 @@ const aiService = require('../services/aiService');
 const Meeting = require('../models/Meeting');
 const Case = require('../models/Case');
 
-// CRITICAL: This must be a direct function export
 module.exports = (io, socket) => {
     let currentMeetingId = null; 
 
-    // 1. VR sends the 6-Digit Code
+    // 1. Join Meeting
     socket.on('join_meeting', async (meetingCode) => {
         try {
-            console.log(`VR trying to join with code: ${meetingCode}`);
-
-            // FIND THE MEETING BY CODE
             const meeting = await Meeting.findOne({ meeting_code: meetingCode });
 
             if (!meeting) {
-                console.log("❌ Meeting Code Not Found");
                 socket.emit('error', 'Invalid Meeting Code');
                 return;
             }
 
-            // Store REAL ID internally
+            // --- CHECK 1: IS MEETING CLOSED? ---
+            if (meeting.status === 'completed') {
+                console.log(`❌ User tried to join ended meeting: ${meetingCode}`);
+                socket.emit('error', 'This meeting has ended. Please start a new one.');
+                return;
+            }
+            // -----------------------------------
+
             currentMeetingId = meeting._id.toString();
             socket.join(currentMeetingId); 
-            
             console.log(`✅ User joined meeting room: ${currentMeetingId}`);
             socket.emit('joined', { success: true }); 
 
@@ -41,40 +42,48 @@ module.exports = (io, socket) => {
         const tempFilePath = `uploads/audio_${socket.id}_${Date.now()}.wav`;
 
         try {
-            fs.writeFileSync(tempFilePath, audioBuffer);
+            // Fetch Meeting to check status
+            const meeting = await Meeting.findById(currentMeetingId);
 
-            // STT
+            // --- CHECK 2: STOP PROCESSING IF CLOSED ---
+            if (!meeting || meeting.status === 'completed') {
+                console.warn("⚠️ Audio received for closed meeting. Ignoring.");
+                socket.emit('error', 'Meeting Ended');
+                return; 
+            }
+            // ------------------------------------------
+
+            fs.writeFileSync(tempFilePath, audioBuffer);
+            
+            // Transcribe
             const userText = await aiService.transcribeAudio(tempFilePath);
             console.log("User said:", userText);
 
             if (!userText) return;
 
-            // Fetch Context
-            const meeting = await Meeting.findById(currentMeetingId);
-            const caseData = await Case.findById(meeting.case_id);
-            
+            // Prepare Context
             const history = meeting.transcript.map(t => ({
                 role: t.speaker === "User" ? "user" : "assistant",
                 content: t.text
             }));
 
-            // AI Logic
-            const aiResponseText = await aiService.getAIResponse(userText, meeting.case_id, history);
-
-            // TTS
-            const audioBase64 = await aiService.generateAudio(aiResponseText);
+            // AI Decision
+            const aiResult = await aiService.getAIResponse(userText, meeting.case_id, history);
+            
+            // Generate Audio
+            const audioBase64 = await aiService.generateAudio(aiResult.text, aiResult.speaker);
 
             // Save to DB
             meeting.transcript.push({ speaker: "User", text: userText });
-            meeting.transcript.push({ speaker: "Lawyer", text: aiResponseText });
+            meeting.transcript.push({ speaker: aiResult.speaker, text: aiResult.text });
             await meeting.save();
 
             // Send to VR
             socket.emit('ai_response', {
-                text: aiResponseText,
+                text: aiResult.text,
                 audio: audioBase64,
-                speaker: "Lawyer",
-                animation: "Objection"
+                speaker: aiResult.speaker,
+                animation: aiResult.emotion
             });
 
         } catch (err) {

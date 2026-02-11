@@ -7,12 +7,16 @@ const verifyToken = require('../middleware/authMiddleware');
 
 const upload = multer({ dest: 'uploads/' });
 
-// CASE UPLOAD
+// CASE MANAGEMENT
 router.post('/upload', verifyToken, upload.single('pdf'), caseController.uploadCase);
+router.get('/my-cases', verifyToken, caseController.getMyCases);
 
 // MEETING MANAGEMENT
 router.post('/meeting/start', verifyToken, meetingController.createMeeting);
-router.post('/meeting/:id/end', verifyToken, meetingController.endMeeting);
+
+router.post('/meeting/end', meetingController.endMeeting);
+
+
 router.get('/meeting/:id', verifyToken, meetingController.getMeeting);
 router.get('/:caseId/history', verifyToken, meetingController.getCaseHistory);
 

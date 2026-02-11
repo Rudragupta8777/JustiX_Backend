@@ -42,8 +42,26 @@ exports.createMeeting = async (req, res) => {
 // 2. End Meeting
 exports.endMeeting = async (req, res) => {
     try {
-        const meeting = await Meeting.findById(req.params.id);
+        const { meetingCode } = req.body; // VR sends this
+
+        if (!meetingCode) {
+            return res.status(400).json({ error: "Meeting Code is required" });
+        }
+
+        // Find by Code instead of ID
+        const meeting = await Meeting.findOne({ meeting_code: meetingCode });
+        
         if (!meeting) return res.status(404).json({ error: "Meeting not found" });
+
+        // If already ended, just return success (Idempotency)
+        if (meeting.status === "completed") {
+            return res.json({ 
+                success: true, 
+                message: "Meeting already ended",
+                summary: meeting.summary,
+                score: meeting.score
+            });
+        }
 
         // Generate Analysis
         const analysis = await aiService.generatePostSessionAnalysis(meeting.transcript);
@@ -51,13 +69,15 @@ exports.endMeeting = async (req, res) => {
         meeting.summary = analysis.summary;
         meeting.feedback = analysis.feedback;
         meeting.score = analysis.score;
-        meeting.status = "completed";
+        meeting.status = "completed"; 
         meeting.ended_at = new Date();
         
         await meeting.save();
 
         res.json({ success: true, ...analysis });
+
     } catch (err) {
+        console.error("End Meeting Error:", err);
         res.status(500).json({ error: err.message });
     }
 };
