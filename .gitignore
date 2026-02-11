@@ -2,3 +2,5 @@
 node_modules
 uploads
 serviceAccountKey.json
+auth.html
+test_client.html

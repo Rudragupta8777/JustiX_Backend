@@ -2,10 +2,8 @@ const { createClient } = require("@deepgram/sdk");
 const fs = require('fs');
 const axios = require('axios'); 
 
-// Initialize Deepgram
 const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
 
-// Python AI URL
 const AI_SERVICE_URL = process.env.AI_MODELS_URI; 
 
 // 1. FAST Speech-to-Text (Deepgram Nova-2)
