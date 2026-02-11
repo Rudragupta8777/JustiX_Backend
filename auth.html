@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Get Auth Token</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f4f4f9; margin: 0; }
+        .container { text-align: center; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        h1 { color: #333; }
+        p { color: #666; }
+        #signInBtn { background-color: #4285F4; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 8px; cursor: pointer; transition: background-color 0.3s; }
+        #signInBtn:hover { background-color: #357ae8; }
+        #tokenContainer { margin-top: 20px; padding: 15px; background-color: #eee; border: 1px solid #ddd; border-radius: 8px; word-wrap: break-word; text-align: left; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Backend API Tester</h1>
+        <p>Click the button below to sign in with Google and get your ID token from the console.</p>
+        <button id="signInBtn">Sign In with Google</button>
+        <div id="userInfo" style="display: none;">
+            <h3 id="userName"></h3>
+            <p id="userEmail"></p>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+
+    <script>
+        // --- IMPORTANT: PASTE YOUR FIREBASE CONFIGURATION HERE ---
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyA0ckxzAqmSM7ABPYHih0JFrYDCDqh8u9c",
+            authDomain: "justix-b1164.firebaseapp.com",
+            projectId: "justix-b1164",
+            storageBucket: "justix-b1164.firebasestorage.app",
+            messagingSenderId: "179286593804",
+            appId: "1:179286593804:web:5f4370bf2eb7f8844ab929",
+            measurementId: "G-5F3BNP8HEE"
+        };
+        // --- END OF CONFIGURATION ---
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const provider = new firebase.auth.GoogleAuthProvider();
+
+        const signInBtn = document.getElementById('signInBtn');
+        const userInfoDiv = document.getElementById('userInfo');
+        const userNameP = document.getElementById('userName');
+        const userEmailP = document.getElementById('userEmail');
+
+        signInBtn.addEventListener('click', async () => {
+            try {
+                const result = await auth.signInWithPopup(provider);
+                const user = result.user;
+                
+                // Get the Firebase ID token
+                const idToken = await user.getIdToken();
+                
+                console.log("✅ Authentication Successful!");
+                console.log("🔑 Your Firebase ID Token (use for /api/auth/login):");
+                console.log(idToken);
+                
+                // Display user info on the page
+                userNameP.textContent = `Welcome, ${user.displayName}`;
+                userEmailP.textContent = user.email;
+                userInfoDiv.style.display = 'block';
+                signInBtn.style.display = 'none';
+
+                alert('Sign-in successful! Check the developer console (F12) for your ID token.');
+
+            } catch (error) {
+                console.error("Authentication failed:", error.message);
+                alert(`Sign-in failed: ${error.message}`);
+            }
+        });
+    </script>
+</body>
+</html>
