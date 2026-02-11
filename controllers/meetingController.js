@@ -1,59 +1,64 @@
 const Meeting = require('../models/Meeting');
-const aiService = require('../services/aiService');
+const aiService = require('../services/aiService'); //
 
-// --- HELPER FUNCTION (Define this outside the exports) ---
+// Helper for 6-digit code
 const generateMeetingCode = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// 1. Start/Resume Meeting
+// 1. Create Meeting (UPDATED)
 exports.createMeeting = async (req, res) => {
     try {
         const { caseId } = req.body;
-        const userId = req.user.uid;
+        const userId = req.user.uid; // From auth middleware
 
-        const count = await Meeting.countDocuments({ case_id: caseId, user_id: userId });
-        
-        // Generate a unique code
+        // 1. Calculate Meeting Number
+        // We count how many meetings already exist for this specific case
+        const count = await Meeting.countDocuments({ case_id: caseId });
+        const nextNumber = count + 1;
+
+        // 2. Generate Code
         let code = generateMeetingCode();
 
+        // 3. Create Document
         const newMeeting = new Meeting({
             case_id: caseId,
             user_id: userId,
-            meeting_number: count + 1,
-            meeting_code: code, // SAVE THE CODE
+            meeting_number: nextNumber, // Save the number
+            meeting_code: code,
             transcript: [],
             status: "active"
         });
 
         await newMeeting.save();
 
+        // 4. Return the Number in the response so Android can see it immediately
         res.json({ 
             success: true, 
             meetingCode: code, 
-            meetingId: newMeeting._id 
+            meetingId: newMeeting._id,
+            meetingNumber: nextNumber // <--- ADDED THIS
         });
 
     } catch (err) {
+        console.error("Create Meeting Error:", err);
         res.status(500).json({ error: err.message });
     }
 };
 
-// 2. End Meeting
+// 2. End Meeting (UPDATED)
 exports.endMeeting = async (req, res) => {
     try {
-        const { meetingCode } = req.body; // VR sends this
+        const { meetingCode } = req.body;
 
         if (!meetingCode) {
             return res.status(400).json({ error: "Meeting Code is required" });
         }
 
-        // Find by Code instead of ID
         const meeting = await Meeting.findOne({ meeting_code: meetingCode });
         
         if (!meeting) return res.status(404).json({ error: "Meeting not found" });
 
-        // If already ended, just return success (Idempotency)
         if (meeting.status === "completed") {
             return res.json({ 
                 success: true, 
@@ -63,7 +68,7 @@ exports.endMeeting = async (req, res) => {
             });
         }
 
-        // Generate Analysis
+        // AI Analysis
         const analysis = await aiService.generatePostSessionAnalysis(meeting.transcript);
 
         meeting.summary = analysis.summary;
@@ -84,15 +89,23 @@ exports.endMeeting = async (req, res) => {
 
 // 3. Get Meeting
 exports.getMeeting = async (req, res) => {
-    const meeting = await Meeting.findById(req.params.id);
-    res.json(meeting);
+    try {
+        const meeting = await Meeting.findById(req.params.id);
+        res.json(meeting);
+    } catch (e) {
+        res.status(500).json({ error: "Meeting not found" });
+    }
 };
 
-// 4. Get History
+// 4. Get History (This returns the full object with meeting_number)
 exports.getCaseHistory = async (req, res) => {
-    const meetings = await Meeting.find({ 
-        case_id: req.params.caseId,
-        user_id: req.user.uid
-    }).sort({ created_at: -1 });
-    res.json(meetings);
+    try {
+        const meetings = await Meeting.find({ 
+            case_id: req.params.caseId,
+            user_id: req.user.uid
+        }).sort({ created_at: -1 }); // Newest first
+        res.json(meetings);
+    } catch (e) {
+        res.status(500).json({ error: "History fetch failed" });
+    }
 };
