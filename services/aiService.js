@@ -68,7 +68,9 @@ exports.generateAudio = async (text, speaker) => {
             { text },
             {
                 model: modelName,
-                encoding: "mp3",
+                container: "wav",     // <--- Wraps audio in WAV header
+                encoding: "linear16", // <--- Standard PCM Audio (WAV)
+                sample_rate: 24000    // <--- High quality speech
             }
         );
 
