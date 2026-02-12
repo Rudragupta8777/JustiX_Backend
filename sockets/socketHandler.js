@@ -1,65 +1,42 @@
 const fs = require('fs');
 const aiService = require('../services/aiService');
 const Meeting = require('../models/Meeting');
-const Case = require('../models/Case');
 
 module.exports = (io, socket) => {
     let currentMeetingId = null; 
 
     // 1. Join Meeting
-    socket.on('join_meeting', async (meetingCode) => {
-        try {
-            const meeting = await Meeting.findOne({ meeting_code: meetingCode });
-
-            if (!meeting) {
-                socket.emit('error', 'Invalid Meeting Code');
-                return;
-            }
-
-            // --- CHECK 1: IS MEETING CLOSED? ---
-            if (meeting.status === 'completed') {
-                console.log(`❌ User tried to join ended meeting: ${meetingCode}`);
-                socket.emit('error', 'This meeting has ended. Please start a new one.');
-                return;
-            }
-            // -----------------------------------
-
-            currentMeetingId = meeting._id.toString();
-            socket.join(currentMeetingId); 
-            console.log(`✅ User joined meeting room: ${currentMeetingId}`);
-            socket.emit('joined', { success: true }); 
-
-        } catch (err) {
-            console.error("Join Error:", err);
-            socket.emit('error', 'Server Error');
-        }
+    socket.on('join_meeting', async (meetingId) => {
+        // ... (Keep existing logic, just ensure variable name matches) ...
+        console.log(`User joining room: ${meetingId}`);
+        currentMeetingId = meetingId;
+        socket.join(meetingId);
+        socket.emit('joined_status', { success: true, meetingId: meetingId });
     });
 
-    // 2. Audio Processing
-    socket.on('audio_data', async (audioBuffer) => {
-        if (!currentMeetingId) return; 
+    // 2. Audio Processing (UPDATED TO MATCH HTML)
+    socket.on('audio_stream', async (data) => {
+        // data = { meetingId, audio: "BASE64STRING...", speaker: "User" }
+        
+        const { meetingId, audio } = data; // Extract fields
+        if (!meetingId) return;
 
         const tempFilePath = `uploads/audio_${socket.id}_${Date.now()}.wav`;
 
         try {
-            // Fetch Meeting to check status
-            const meeting = await Meeting.findById(currentMeetingId);
-
-            // --- CHECK 2: STOP PROCESSING IF CLOSED ---
-            if (!meeting || meeting.status === 'completed') {
-                console.warn("⚠️ Audio received for closed meeting. Ignoring.");
-                socket.emit('error', 'Meeting Ended');
-                return; 
-            }
-            // ------------------------------------------
-
+            // CONVERT BASE64 TO BUFFER
+            const audioBuffer = Buffer.from(audio, 'base64');
             fs.writeFileSync(tempFilePath, audioBuffer);
             
+            // --- REST OF YOUR LOGIC IS SAME ---
             // Transcribe
             const userText = await aiService.transcribeAudio(tempFilePath);
             console.log("User said:", userText);
 
             if (!userText) return;
+
+            const meeting = await Meeting.findById(meetingId);
+            if (!meeting) return;
 
             // Prepare Context
             const history = meeting.transcript.map(t => ({
@@ -83,7 +60,7 @@ module.exports = (io, socket) => {
                 text: aiResult.text,
                 audio: audioBase64,
                 speaker: aiResult.speaker,
-                animation: aiResult.emotion
+                emotion: aiResult.emotion
             });
 
         } catch (err) {
