@@ -1,5 +1,5 @@
 const Meeting = require('../models/Meeting');
-const Case = require('../models/Case'); // Required for VR Join to fetch images
+const Case = require('../models/Case'); 
 const aiService = require('../services/aiService');
 
 // Helper for 6-digit code
@@ -7,25 +7,20 @@ const generateMeetingCode = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// 1. Create Meeting (Starts a new session from Mobile)
+// 1. Create Meeting
 exports.createMeeting = async (req, res) => {
     try {
         const { caseId } = req.body;
-        const userId = req.user.uid; // From auth middleware
+        const userId = req.user.uid;
 
-        // A. Calculate Meeting Number
-        // We count how many meetings already exist for this specific case
         const count = await Meeting.countDocuments({ case_id: caseId });
         const nextNumber = count + 1;
-
-        // B. Generate Unique Code
         let code = generateMeetingCode();
 
-        // C. Create Document
         const newMeeting = new Meeting({
             case_id: caseId,
             user_id: userId,
-            meeting_number: nextNumber, // Save the sequential number
+            meeting_number: nextNumber,
             meeting_code: code,
             transcript: [],
             status: "active"
@@ -33,7 +28,6 @@ exports.createMeeting = async (req, res) => {
 
         await newMeeting.save();
 
-        // D. Return the Number so Android displays "Session #X" immediately
         res.json({ 
             success: true, 
             meetingCode: code, 
@@ -47,38 +41,25 @@ exports.createMeeting = async (req, res) => {
     }
 };
 
-// 2. VR Join (Headset calls this to validate code & get images)
+// 2. VR Join
 exports.joinMeetingVR = async (req, res) => {
     try {
         const { meetingCode } = req.body;
 
-        if (!meetingCode) {
-            return res.status(400).json({ error: "Meeting Code is required" });
-        }
+        if (!meetingCode) return res.status(400).json({ error: "Meeting Code is required" });
 
-        // A. Find the Meeting
         const meeting = await Meeting.findOne({ meeting_code: meetingCode });
-        if (!meeting) {
-            return res.status(404).json({ error: "Invalid Session Code" });
-        }
+        if (!meeting) return res.status(404).json({ error: "Invalid Session Code" });
 
-        // B. Find the Case Details (Specifically Images)
         const caseData = await Case.findById(meeting.case_id);
-        if (!caseData) {
-            return res.status(404).json({ error: "Case file not found" });
-        }
+        if (!caseData) return res.status(404).json({ error: "Case file not found" });
 
-        // C. Return Everything the VR Needs
         res.json({
             success: true,
             meetingId: meeting._id,
             caseId: caseData._id,
             caseTitle: caseData.title,
-            
-            // The VR headset will spawn these pages on the virtual desk
             evidencePages: caseData.page_images, 
-            
-            // Optional context for local processing
             caseSummary: caseData.summary
         });
 
@@ -88,32 +69,47 @@ exports.joinMeetingVR = async (req, res) => {
     }
 };
 
-// 3. End Meeting (Called by VR or Mobile to finish session)
+// 3. End Meeting (UPDATED: Uses meetingId)
 exports.endMeeting = async (req, res) => {
     try {
-        const { meetingCode } = req.body;
+        // CHANGED: Expect meetingId instead of meetingCode
+        const { meetingId } = req.body;
 
-        if (!meetingCode) {
-            return res.status(400).json({ error: "Meeting Code is required" });
+        if (!meetingId) {
+            return res.status(400).json({ error: "Meeting ID is required" });
         }
 
-        const meeting = await Meeting.findOne({ meeting_code: meetingCode });
+        // CHANGED: Find by ID
+        const meeting = await Meeting.findById(meetingId);
         
         if (!meeting) return res.status(404).json({ error: "Meeting not found" });
 
-        // Idempotency check: If already completed, just return results
+        // Idempotency check
         if (meeting.status === "completed") {
             return res.json({ 
                 success: true, 
                 message: "Meeting already ended",
                 summary: meeting.summary,
-                score: meeting.score
+                score: meeting.score,
+                feedback: meeting.feedback
             });
         }
 
-        // Generate AI Analysis
+        // --- Generate AI Analysis ---
         const analysis = await aiService.generatePostSessionAnalysis(meeting.transcript);
 
+        // --- Generate Judge's Closing Audio ---
+        const closingText = "The court is adjourned. We will review your arguments in the next session.";
+        let closingAudio = null;
+        
+        try {
+            // Generates audio using the "Judge" persona
+            closingAudio = await aiService.generateAudio(closingText, "Judge");
+        } catch (audioErr) {
+            console.error("Failed to generate closing audio:", audioErr);
+        }
+
+        // --- Update Database ---
         meeting.summary = analysis.summary;
         meeting.feedback = analysis.feedback;
         meeting.score = analysis.score;
@@ -122,7 +118,12 @@ exports.endMeeting = async (req, res) => {
         
         await meeting.save();
 
-        res.json({ success: true, ...analysis });
+        res.json({ 
+            success: true, 
+            ...analysis, 
+            closing_audio: closingAudio, 
+            closing_text: closingText 
+        });
 
     } catch (err) {
         console.error("End Meeting Error:", err);
@@ -130,7 +131,7 @@ exports.endMeeting = async (req, res) => {
     }
 };
 
-// 4. Get Single Meeting (For Details Screen)
+// 4. Get Single Meeting
 exports.getMeeting = async (req, res) => {
     try {
         const meeting = await Meeting.findById(req.params.id);
@@ -140,13 +141,13 @@ exports.getMeeting = async (req, res) => {
     }
 };
 
-// 5. Get History (For Case Details List)
+// 5. Get History
 exports.getCaseHistory = async (req, res) => {
     try {
         const meetings = await Meeting.find({ 
             case_id: req.params.caseId,
             user_id: req.user.uid
-        }).sort({ created_at: -1 }); // Newest first
+        }).sort({ created_at: -1 }); 
         res.json(meetings);
     } catch (e) {
         res.status(500).json({ error: "History fetch failed" });
